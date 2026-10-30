@@ -109,23 +109,25 @@
 
   <!-- STEP 1: UPLOAD -->
   <section class="card" id="uploadCard">
-    <h2>1. Upload this week's ePartner export</h2>
-    <p class="sub">ePartner → Application → Policy Enquiry → View All Policies → Export (Excel or CSV). Your file is read inside this browser only. It is never sent to GitHub or any server.</p>
+    <h2>1. Get this week's unpaid list from ePartner</h2>
+    <p class="sub">No file needed. You log in to ePartner yourself, then one click brings everything here: View all policies, plus each overdue customer's mobile number, overdue amount, suspense and lapse date. Your own policies are skipped. Data goes only from ePartner to this page in your browser.</p>
+    <div class="row" style="margin-bottom:10px">
+      <a class="btn" style="background:var(--brand);color:#fff;border-color:var(--brand);text-decoration:none;padding:10px 16px" href="https://epartner-my.greateasternlife.com/" target="_blank" rel="noopener">🔐 Step 1: Log in to ePartner</a>
+      <span class="muted">→ then <b>Step 2:</b> on any ePartner page, click <b>📥 Noti-premium</b> in your bookmarks bar.</span>
+    </div>
+    <details id="bmSetup" style="margin-bottom:14px">
+      <summary><b>One-time setup: add the 📥 Noti-premium bookmark</b> (Chrome on your computer)</summary>
+      <ol style="margin:8px 0 0 18px;padding:0;font-size:13.5px">
+        <li>Show Chrome's bookmarks bar: press <b>⌘⇧B</b> (Mac) or <b>Ctrl+Shift+B</b> (Windows).</li>
+        <li><b>Drag this button onto the bar:</b> <a id="collectorLink" class="btn" style="display:inline-block;margin:4px 0;background:var(--brand);color:#fff;text-decoration:none" href="#" onclick="alert('Drag this button to your bookmarks bar instead of clicking it.');return false">📥 Noti-premium</a></li>
+        <li>Done. If you added an older "Noti-premium collector" bookmark, delete it and use this one.</li>
+      </ol>
+    </details>
     <div class="drop" id="drop" onclick="document.getElementById('file').click()">
-      <strong>Drop the file here</strong> or click to choose · .xlsx / .xls / .csv
+      <strong>Or drop a file here</strong> (.xlsx / .xls / .csv), or click to choose
       <div id="fileInfo" class="muted" style="margin-top:6px"></div>
     </div>
     <input type="file" id="file" accept=".xlsx,.xls,.csv" class="hidden">
-    <details style="margin-top:14px">
-      <summary><b>📥 Get the file from ePartner in one click (recommended, on a computer)</b></summary>
-      <p class="sub" style="margin-top:8px">ePartner's list has no phone numbers or overdue amounts. The collector reads them from each overdue policy's details, using your own ePartner login, and saves one file for this app. Nothing is sent anywhere else.</p>
-      <ol style="margin:0 0 8px 18px;padding:0;font-size:13.5px">
-        <li><b>One time:</b> show Chrome's bookmarks bar (⌘⇧B), then <b>drag this button onto it</b>: <a id="collectorLink" class="btn" style="display:inline-block;margin:4px 0;background:var(--brand);color:#fff;text-decoration:none" href="#" onclick="alert('Drag this button to your bookmarks bar instead of clicking it.');return false">📥 Noti-premium collector</a></li>
-        <li><b>Every week:</b> log in to ePartner yourself → Policy Enquiry → <b>View all policies</b> → Submit.</li>
-        <li>Click <b>📥 Noti-premium collector</b> in your bookmarks bar. It skips your own policies and saves <i>Noti-premium_ePartner_[date].csv</i> to Downloads.</li>
-        <li>Drop that file into the box above.</li>
-      </ol>
-    </details>
   </section>
 
   <!-- STEP 2: CONFIRM MAPPING -->
@@ -288,14 +290,17 @@ function readFile(file) {
 
 function loadWorkbook(wb, fileName) {
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+  loadAOA(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }), `Loaded "${fileName}" · sheet "${wb.SheetNames[0]}"`);
+}
+
+function loadAOA(aoa, source) {
   const hi = findHeaderRow(aoa);
   const headers = (aoa[hi] || []).map((h, i) => String(h).trim() || ('Column ' + (i + 1)));
   const rows = aoa.slice(hi + 1)
     .filter(r => r.some(c => String(c).trim() !== ''))
     .map((r, idx) => { const o = { _row: hi + idx + 2 }; headers.forEach((h, i) => o[h] = r[i]); return o; });
-  raw = { headers, rows, fileName };
-  document.getElementById('fileInfo').textContent = `Loaded "${fileName}" · sheet "${wb.SheetNames[0]}" · ${rows.length} policies`;
+  raw = { headers, rows };
+  document.getElementById('fileInfo').textContent = `${source} · ${rows.length} policies`;
   buildMappingUI();
 }
 
@@ -652,65 +657,121 @@ function hide(id) { document.getElementById(id).classList.add('hidden'); }
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
-/* ---------- ePartner collector (runs as a bookmark on the ePartner "View all policies" page) ---------- */
-// Self-contained: it must not use anything else from this app, because it runs inside ePartner.
+/* ---------- 📥 Noti-premium bookmark (runs inside ePartner after you log in) ---------- */
+// Self-contained: it must not use anything else from this app, because it runs on the ePartner page.
+// It opens View all policies in the background, reads each overdue customer policy, and hands the
+// results straight to the Noti-premium tab. If that tab cannot open, it saves a CSV file instead.
 async function NP_COLLECT(testMode) {
-  const T = [...document.querySelectorAll('table')].find(t => t.rows.length > 1 && /Policy No/.test(t.rows[0].innerText) && /Premium Due Date/.test(t.rows[0].innerText));
-  if (!T) { alert('Noti-premium: open ePartner > Policy Enquiry > View all policies and press Submit first, then click this bookmark again.'); return; }
-  const txt = s => String(s || '').replace(/\s+/g, ' ').trim();
-  const H = [...T.rows[0].cells].map(c => txt(c.innerText)), col = n => H.indexOf(n);
-  const pd = s => { const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], m[2] - 1, +m[1]) : null; };
-  const agent = txt((document.body.innerText.match(/Agent Name:\s*([^\n]+)/) || [])[1]);
-  const f = document.forms.FPMS_PolicyEnquiryForm, plan = {};
-  for (let k = 0; f && f['policyStr' + k]; k++) plan[f['policyStr' + k].value] = f['mainPlan' + k] ? f['mainPlan' + k].value : '';
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const rows = [...T.rows].slice(1).map(r => [...r.cells].map(c => txt(c.innerText)));
-  const own = rows.filter(c => c[col('Policy Holder')] === agent).length;
-  const inforce = rows.filter(c => /^Inforce/i.test(c[col('Status')]) && !/fully paid|waived/i.test(c[col('Status')]) && c[col('Policy Holder')] !== agent);
+  const APP = 'https://shimkailun.github.io';
+  if (location.hostname !== 'epartner-my.greateasternlife.com') { alert('Noti-premium: log in to ePartner first. When the ePartner home page is showing, click this bookmark again.'); return; }
+  const app = testMode ? null : window.open(APP + '/noti-premium/#epartner', 'noti_premium');   // opened during the click so Chrome allows it
+  let ready = false;
+  const onMsg = e => { if (e.origin === APP && e.data && e.data.type === 'np-ready') ready = true; };
+  window.addEventListener('message', onMsg);
   const box = document.createElement('div');
-  box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:99999;background:#0f766e;color:#fff;padding:14px 18px;border-radius:10px;font:14px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:340px';
+  box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:99999;background:#0f766e;color:#fff;padding:14px 18px;border-radius:10px;font:14px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:360px';
   document.body.appendChild(box);
-  const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/, NUM = /^-?[\d,]+(\.\d+)?$/;
-  const out = [], due = inforce.filter(c => pd(c[col('Premium Due Date')]) && pd(c[col('Premium Due Date')]) <= today);
-  let n = 0;
-  for (const c of inforce) {
-    const pol = c[col('Policy No.')];
-    const rec = { 'Policy No': pol, 'Policy Holder': c[col('Policy Holder')], 'Mobile No': '', 'Premium Amount': c[col('Premium Amount')], 'Overdue Premium': '', 'Suspense': '', 'Total Debts': '',
-      'Next Due Date': c[col('Premium Due Date')], 'Last Payment Date': c[col('Last payment date')], 'Potential Lapse Date': '', 'Payment Method': c[col('Payment Method')], 'Payment Mode': c[col('Payment Mode')], 'Status': c[col('Status')], 'Note': '' };
-    if (due.includes(c)) {
-      box.textContent = 'Noti-premium: reading overdue policy ' + (++n) + ' of ' + due.length + '…';
-      try {
-        const url = new URL('policyEnquiry.do?action=getPolicyDetail&policyNoInput=' + encodeURIComponent(pol) + '&planTypeInput=' + encodeURIComponent(plan[pol] || ''), location.href);
-        const d = new DOMParser().parseFromString(await (await fetch(url, { credentials: 'include' })).text(), 'text/html');
-        d.querySelectorAll('script,style').forEach(e => e.remove());
-        const cells = [...d.querySelectorAll('td,th')].map(x => txt(x.textContent));
-        const get = (label, re) => { const i = cells.indexOf(label); if (i < 0) return ''; for (let j = i + 1; j <= i + 2 && j < cells.length; j++) { const v = cells[j].replace(/^:\s*/, ''); if (re.test(v)) return v; } return ''; };
-        rec['Mobile No'] = get('Mobile No', /\d{7,}/);
-        rec['Overdue Premium'] = get('Overdue Premium', NUM);
-        rec['Suspense'] = get('Suspense', NUM);
-        rec['Total Debts'] = get('Total Debts', NUM);
-        rec['Potential Lapse Date'] = get('Potential Lapse Date', DATE);
-        rec['Next Due Date'] = get('Next Due Date', DATE) || rec['Next Due Date'];
-        rec['Last Payment Date'] = get('Last Payment Date', DATE) || rec['Last Payment Date'];
-        rec['Premium Amount'] = get('Total Installment Premium', NUM) || rec['Premium Amount'];
-        if (!rec['Overdue Premium']) rec.Note = 'Overdue amount not found on policy page';
-      } catch (e) { rec.Note = 'Could not open policy details'; }
-      await new Promise(r => setTimeout(r, 300));
-    } else rec.Note = 'Not due yet';
-    out.push(rec);
+  const say = t => { box.textContent = 'Noti-premium: ' + t; };
+  const txt = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const pd = s => { const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], m[2] - 1, +m[1]) : null; };
+  const base = location.origin + '/ePartner3_fpms/fpms/customerService/policyEnquiry.do';
+  const page = async (url, opt) => new DOMParser().parseFromString(await (await fetch(url, Object.assign({ credentials: 'include' }, opt))).text(), 'text/html');
+  try {
+    say('opening View all policies…');
+    const form = (await page(base + '?action=doLoadDefault')).forms.FPMS_PolicyEnquiryForm;
+    if (!form) throw new Error('could not open Policy Enquiry. Please check you are logged in to ePartner, then click the bookmark again.');
+    const p = new URLSearchParams();
+    for (const el of form.elements) {
+      if (!el.name || ['submit', 'reset', 'button'].includes(el.type) || ((el.type === 'radio' || el.type === 'checkbox') && !el.checked)) continue;
+      p.append(el.name, el.value);
+    }
+    p.set('optionSelection', 'All_policies'); p.set('action', 'getPolicyEnquiryResult');
+    const d = await page(base, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: p.toString() });
+    const T = [...d.querySelectorAll('table')].find(t => t.rows.length > 1 && /Policy No/.test(t.rows[0].textContent) && /Premium Due Date/.test(t.rows[0].textContent));
+    if (!T) throw new Error('View all policies did not return a policy list. Please try again.');
+    const H = [...T.rows[0].cells].map(c => txt(c.textContent)), col = n => H.indexOf(n);
+    const agent = txt((d.body.textContent.match(/Agent Name:\s*([^\n]+)/) || [])[1]);
+    const plan = {};
+    for (let k = 0; d.querySelector(`input[name="policyStr${k}"]`); k++) { const m = d.querySelector(`input[name="mainPlan${k}"]`); plan[d.querySelector(`input[name="policyStr${k}"]`).value] = m ? m.value : ''; }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const rows = [...T.rows].slice(1).map(r => [...r.cells].map(c => txt(c.textContent)));
+    const own = rows.filter(c => c[col('Policy Holder')] === agent).length;
+    const inforce = rows.filter(c => /^Inforce/i.test(c[col('Status')]) && !/fully paid|waived/i.test(c[col('Status')]) && c[col('Policy Holder')] !== agent);
+    const due = inforce.filter(c => pd(c[col('Premium Due Date')]) && pd(c[col('Premium Due Date')]) <= today);
+    const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/, NUM = /^-?[\d,]+(\.\d+)?$/;
+    const out = [];
+    let n = 0;
+    for (const c of inforce) {
+      const pol = c[col('Policy No.')];
+      const rec = { 'Policy No': pol, 'Policy Holder': c[col('Policy Holder')], 'Mobile No': '', 'Premium Amount': c[col('Premium Amount')], 'Overdue Premium': '', 'Suspense': '', 'Total Debts': '',
+        'Next Due Date': c[col('Premium Due Date')], 'Last Payment Date': c[col('Last payment date')], 'Potential Lapse Date': '', 'Payment Method': c[col('Payment Method')], 'Payment Mode': c[col('Payment Mode')], 'Status': c[col('Status')], 'Note': '' };
+      if (due.includes(c)) {
+        say('reading overdue policy ' + (++n) + ' of ' + due.length + '…');
+        try {
+          const dd = await page(base + '?action=getPolicyDetail&policyNoInput=' + encodeURIComponent(pol) + '&planTypeInput=' + encodeURIComponent(plan[pol] || ''));
+          dd.querySelectorAll('script,style').forEach(e => e.remove());
+          const cells = [...dd.querySelectorAll('td,th')].map(x => txt(x.textContent));
+          const get = (label, re) => { const i = cells.indexOf(label); if (i < 0) return ''; for (let j = i + 1; j <= i + 2 && j < cells.length; j++) { const v = cells[j].replace(/^:\s*/, ''); if (re.test(v)) return v; } return ''; };
+          rec['Mobile No'] = get('Mobile No', /\d{7,}/);
+          rec['Overdue Premium'] = get('Overdue Premium', NUM);
+          rec['Suspense'] = get('Suspense', NUM);
+          rec['Total Debts'] = get('Total Debts', NUM);
+          rec['Potential Lapse Date'] = get('Potential Lapse Date', DATE);
+          rec['Next Due Date'] = get('Next Due Date', DATE) || rec['Next Due Date'];
+          rec['Last Payment Date'] = get('Last Payment Date', DATE) || rec['Last Payment Date'];
+          rec['Premium Amount'] = get('Total Installment Premium', NUM) || rec['Premium Amount'];
+          if (!rec['Overdue Premium']) rec.Note = 'Overdue amount not found on policy page';
+        } catch (e) { rec.Note = 'Could not open policy details'; }
+        await new Promise(r => setTimeout(r, 300));
+      } else rec.Note = 'Not due yet';
+      out.push(rec);
+    }
+    const summary = 'checked ' + due.length + ' overdue policies (' + own + ' of your own skipped).';
+    if (testMode) return { rows: out, agent, overdueChecked: due.length, own };
+    say('sending the results to Noti-premium…');
+    for (let i = 0; i < 40 && !ready && app && !app.closed; i++) await new Promise(r => setTimeout(r, 250));
+    if (app && !app.closed && ready) {
+      app.postMessage({ type: 'np-data', rows: out, agent, at: new Date().toISOString() }, APP);
+      say('done, ' + summary + ' Your list is open in the Noti-premium tab.');
+      app.focus();
+    } else {
+      const cols = Object.keys(out[0] || { 'Policy No': 1 });
+      const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([[cols.map(q).join(',')].concat(out.map(r => cols.map(k => q(r[k])).join(','))).join('\r\n')], { type: 'text/csv' }));
+      a.download = 'Noti-premium_ePartner_' + today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0') + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      say('done, ' + summary + ' The Noti-premium tab could not open (pop-up blocked?), so the list was saved to Downloads. Drop it into Noti-premium.');
+    }
+  } catch (e) {
+    box.style.background = '#b42318'; say(e.message);
+    if (app && !app.closed && !ready) app.close();
+  } finally {
+    window.removeEventListener('message', onMsg);
+    setTimeout(() => box.remove(), 20000);
   }
-  const cols = Object.keys(out[0] || { 'Policy No': 1 });
-  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const csv = [cols.map(q).join(',')].concat(out.map(r => cols.map(k => q(r[k])).join(','))).join('\r\n');
-  box.textContent = 'Noti-premium: done. Checked ' + due.length + ' overdue policies (' + own + ' of your own skipped). Now drop the downloaded file into Noti-premium.';
-  setTimeout(() => box.remove(), 15000);
-  if (testMode) return { csv, overdueChecked: due.length, rows: out.length, own };
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = 'Noti-premium_ePartner_' + today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0') + '.csv';
-  document.body.appendChild(a); a.click(); a.remove();
 }
 document.getElementById('collectorLink').href = 'javascript:' + encodeURIComponent('(' + NP_COLLECT.toString() + ')()');
+
+/* ---------- receive the list straight from the ePartner bookmark (no file) ---------- */
+if (window.opener && location.hash === '#epartner') {
+  const EPARTNER = 'https://epartner-my.greateasternlife.com';
+  const fileInfo = document.getElementById('fileInfo');
+  fileInfo.textContent = 'Waiting for ePartner… (keep the ePartner tab open)';
+  const ping = setInterval(() => { try { window.opener.postMessage({ type: 'np-ready' }, EPARTNER); } catch (e) {} }, 700);
+  setTimeout(() => clearInterval(ping), 5 * 60000);
+  window.addEventListener('message', e => {
+    if (e.origin !== EPARTNER || !e.data || e.data.type !== 'np-data') return;
+    clearInterval(ping);
+    history.replaceState(null, '', location.pathname);
+    const rows = e.data.rows || [];
+    if (!rows.length) { fileInfo.textContent = 'ePartner returned no in-force customer policies.'; return; }
+    const cols = Object.keys(rows[0]);
+    loadAOA([cols].concat(rows.map(r => cols.map(c => r[c] == null ? '' : r[c]))), `Loaded live from ePartner (${e.data.agent || 'agent'}) at ${new Date(e.data.at).toLocaleString('en-GB')}`);
+    // the bookmark's columns are always recognised, so go straight to the results
+    if (FIELDS.every(f => !f.req || document.getElementById('map_' + f.key).value) && document.querySelector('#statusList input:checked')) confirmMapping();
+  });
+}
 
 /* ---------- install to home screen / dock ---------- */
 let installEvt = null;
