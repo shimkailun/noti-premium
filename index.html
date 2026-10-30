@@ -182,6 +182,9 @@
     <p class="muted" style="font-size:12.5px;margin:12px 0 4px">Placeholders: <code>{name}</code> <code>{policy}</code> <code>{amount}</code> <code>{due}</code> <code>{days}</code> <code>{agent}</code></p>
     <label class="f">Reminder 1 (day 3+)</label><textarea id="sT1"></textarea>
     <label class="f" style="margin-top:10px">Reminder 2 (day 7+)</label><textarea id="sT2"></textarea>
+    <p class="muted" style="font-size:12.5px;margin:16px 0 4px">For a customer with <b>several overdue policies</b> (one combined message). Placeholders: <code>{name}</code> <code>{policies}</code> (the list) <code>{total}</code> <code>{count}</code> <code>{agent}</code></p>
+    <label class="f">Reminder 1, several policies</label><textarea id="sT1M"></textarea>
+    <label class="f" style="margin-top:10px">Reminder 2, several policies</label><textarea id="sT2M"></textarea>
     <div class="row" style="margin-top:12px">
       <button class="primary" onclick="saveSettings()">Save settings</button>
       <button onclick="resetTemplates()">Restore default messages</button>
@@ -205,8 +208,10 @@ const LS = {
 
 const DEFAULT_T1 = "Hi {name}, this is {agent}, your insurance agent. Just a friendly reminder that the premium of RM{amount} for your policy {policy} (due {due}) has not been successfully received yet.\n\nTo keep your coverage active and avoid an outstanding amount building up on your policy, please make the payment at your earliest convenience, or let me know if your payment method needs updating. I'm happy to help.\n\nIf you have already paid, please ignore this message. Thank you!";
 const DEFAULT_T2 = "Following up on my earlier reminder: the premium of RM{amount} for your policy {policy}, due on {due}, is still showing as unsuccessful ({days} days now).\n\nAn unpaid premium can create a debt on your policy and may affect your coverage. Could you please arrange payment soon? If you have already paid, kindly notify me so that I can check it has been allocated correctly to your policy.\n\nThank you, and feel free to call or message me if you need any help.";
+const DEFAULT_T1M = "Hi {name}, this is {agent}, your insurance agent. Just a friendly reminder that the premiums for these {count} policies of yours have not been successfully received yet:\n\n{policies}\n\nTotal: RM{total}\n\nTo keep your coverage active and avoid outstanding amounts building up on your policies, please make the payment at your earliest convenience, or let me know if your payment method needs updating. I'm happy to help.\n\nIf you have already paid, please ignore this message. Thank you!";
+const DEFAULT_T2M = "Following up on my earlier reminder: the premiums for these {count} policies of yours are still showing as unsuccessful:\n\n{policies}\n\nTotal: RM{total}\n\nAn unpaid premium can create a debt on your policies and may affect your coverage. Could you please arrange payment soon? If you have already paid, kindly notify me so that I can check it has been allocated correctly to your policies.\n\nThank you, and feel free to call or message me if you need any help.";
 
-let settings = Object.assign({ agent: 'Kai Lun', wa: 'web', date: 'dmy', t1: DEFAULT_T1, t2: DEFAULT_T2 }, LS.get('settings', {}));
+let settings = Object.assign({ agent: 'Kai Lun', wa: 'web', date: 'dmy', t1: DEFAULT_T1, t2: DEFAULT_T2, t1m: DEFAULT_T1M, t2m: DEFAULT_T2M }, LS.get('settings', {}));
 let log = LS.get('log', {});          // key: policy|dueISO -> {name, phone, r1, r2}
 let mapping = LS.get('mapping', {});  // field -> header name
 let failStatuses = LS.get('failStatuses', null);
@@ -458,33 +463,58 @@ function analyse() {
   document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
 }
 
+/* one row and one WhatsApp per customer: policies with the same mobile, name and next step are combined */
+let groups = [];
+function regroup() {
+  const by = new Map();
+  for (const f of flagged) {
+    const k = f.phone + '|' + f.name + '|' + f.stage;
+    if (!by.has(k)) by.set(k, { phone: f.phone, name: f.name, stage: f.stage, items: [] });
+    by.get(k).items.push(f);
+  }
+  groups = [...by.values()].map(g => {
+    g.items.sort((a, b) => b.days - a.days);
+    g.days = g.items[0].days;
+    g.label = g.items[0].label;
+    g.total = g.items.some(f => f.amount == null) ? null : g.items.reduce((s, f) => s + f.amount, 0);
+    g.warns = g.items.flatMap(f => f.warns.map(w => g.items.length > 1 ? `${f.policy}: ${w}` : w));
+    return g;
+  }).sort((a, b) => b.days - a.days);
+}
+
 function render() {
-  const c = s => flagged.filter(f => f.stage === s).length;
+  regroup();
+  const c = s => groups.filter(g => g.stage === s).length;
+  const p = s => flagged.filter(f => f.stage === s).length;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   const outstanding = flagged.reduce((s, f) => s + (f.amount || 0), 0);
   document.getElementById('stats').innerHTML = `
-    <div class="stat r1"><div class="n">${c('r1')}</div><div class="l">Reminder 1 to send (day 3+)</div></div>
-    <div class="stat r2"><div class="n">${c('r2')}</div><div class="l">Reminder 2 to send (day 7+)</div></div>
-    <div class="stat"><div class="n">${flagged.length}</div><div class="l">Unpaid policies · RM ${fmtRM(outstanding)}</div></div>
+    <div class="stat r1"><div class="n">${c('r1')}</div><div class="l">Reminder 1 messages to send (${plural(p('r1'), 'policy').replace('policys', 'policies')})</div></div>
+    <div class="stat r2"><div class="n">${c('r2')}</div><div class="l">Reminder 2 messages to send (${plural(p('r2'), 'policy').replace('policys', 'policies')})</div></div>
+    <div class="stat"><div class="n">${flagged.length}</div><div class="l">Unpaid policies · ${plural(new Set(flagged.map(f => f.phone + '|' + f.name)).size, 'customer')} · RM ${fmtRM(outstanding)}</div></div>
     <div class="stat bad"><div class="n">${issues.length}</div><div class="l">Data issues to check</div></div>
     <div class="stat ok"><div class="n">${resolved.length}</div><div class="l">Resolved since last reminder</div></div>
     ${mapping.overdue ? `<div class="stat ok"><div class="n">${paidCount}</div><div class="l">Paid or not yet due (ignored)</div></div>` : ''}`;
 
-  const tabs = [['action', 'To send now', c('r1') + c('r2')], ['all', 'All unpaid', flagged.length], ['watch', 'Watching (<3 days)', c('watch')], ['sent', 'Already reminded', c('waiting') + c('done')]];
+  const tabs = [['action', 'To send now', c('r1') + c('r2')], ['all', 'All unpaid', groups.length], ['watch', 'Watching (<3 days)', c('watch')], ['sent', 'Already reminded', c('waiting') + c('done')]];
   document.getElementById('tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${k === activeTab ? 'on' : ''}" onclick="activeTab='${k}';render()">${l} (${n})</button>`).join('');
 
-  const list = flagged.filter(f => activeTab === 'all' ? true : activeTab === 'action' ? (f.stage === 'r1' || f.stage === 'r2') : activeTab === 'watch' ? f.stage === 'watch' : (f.stage === 'waiting' || f.stage === 'done'));
+  const list = groups.filter(g => activeTab === 'all' ? true : activeTab === 'action' ? (g.stage === 'r1' || g.stage === 'r2') : activeTab === 'watch' ? g.stage === 'watch' : (g.stage === 'waiting' || g.stage === 'done'));
   const pc = { r1: 'p-r1', r2: 'p-r2', watch: 'p-watch', waiting: 'p-watch', done: 'p-ok' };
   document.getElementById('tbl').innerHTML = `<tr><th>Customer</th><th>Policy</th><th>Amount owed</th><th>Due date</th><th>Days</th><th>ePartner status</th><th>Next step</th><th></th></tr>` +
-    list.map(f => {
-      const i = flagged.indexOf(f);
+    list.map(g => {
+      const gi = groups.indexOf(g), f = g.items[0], multi = g.items.length > 1;
       const sentInfo = [f.log.r1 && 'R1 ' + f.log.r1, f.log.r2 && 'R2 ' + f.log.r2].filter(Boolean).join(' · ');
-      const btn = f.stage === 'r1' ? `<button class="wa" onclick="openSend(${i},1)">WhatsApp R1</button>`
-        : f.stage === 'r2' ? `<button class="wa" onclick="openSend(${i},2)">WhatsApp R2</button>`
-        : f.stage === 'done' ? `<a class="btn" href="tel:+${f.phone}">📞 Call</a>` : '';
-      return `<tr><td class="c-name"><b>${esc(f.name || '(no name)')}</b><br><span class="muted">+${f.phone}</span>${f.warns.length ? `<br><span class="warn">⚠ ${f.warns.join(', ')}</span>` : ''}</td>
-        <td data-l="Policy">${esc(f.policy)}</td><td data-l="Amount owed">${f.amount != null ? 'RM ' + fmtRM(f.amount) : '<span class="muted">n/a</span>'}</td>
-        <td data-l="Due date">${fmtD(f.due)}${f.lastPaid ? `<br><span class="muted" style="font-size:12px">last paid ${fmtD(f.lastPaid)}</span>` : ''}</td><td data-l="Days"><b>${f.days}</b></td><td data-l="ePartner status">${esc(f.status)}</td>
-        <td class="c-step"><span class="pill ${pc[f.stage]}">${f.label}</span>${sentInfo ? `<br><span class="muted" style="font-size:12px">${sentInfo}</span>` : ''}</td><td class="c-btn">${btn}</td></tr>`;
+      const btn = g.stage === 'r1' ? `<button class="wa" onclick="openSend(${gi},1)">WhatsApp R1</button>`
+        : g.stage === 'r2' ? `<button class="wa" onclick="openSend(${gi},2)">WhatsApp R2</button>`
+        : g.stage === 'done' ? `<a class="btn" href="tel:+${g.phone}">📞 Call</a>` : '';
+      const each = fn => g.items.map(fn).join('<br>');
+      return `<tr><td class="c-name"><b>${esc(g.name || '(no name)')}</b>${multi ? ` <span class="pill p-watch">${g.items.length} policies</span>` : ''}<br><span class="muted">+${g.phone}</span>${g.warns.length ? `<br><span class="warn">⚠ ${g.warns.map(esc).join('<br>⚠ ')}</span>` : ''}</td>
+        <td data-l="Policy">${each(x => esc(x.policy))}</td>
+        <td data-l="Amount owed">${each(x => x.amount != null ? 'RM ' + fmtRM(x.amount) : '<span class="muted">n/a</span>')}${multi && g.total != null ? `<br><b>Total RM ${fmtRM(g.total)}</b>` : ''}</td>
+        <td data-l="Due date">${each(x => fmtD(x.due))}${!multi && f.lastPaid ? `<br><span class="muted" style="font-size:12px">last paid ${fmtD(f.lastPaid)}</span>` : ''}</td>
+        <td data-l="Days">${each(x => `<b>${x.days}</b>`)}</td><td data-l="ePartner status">${[...new Set(g.items.map(x => esc(x.status)))].join('<br>')}</td>
+        <td class="c-step"><span class="pill ${pc[g.stage]}">${g.label}</span>${sentInfo ? `<br><span class="muted" style="font-size:12px">${sentInfo}</span>` : ''}</td><td class="c-btn">${btn}</td></tr>`;
     }).join('');
   document.getElementById('emptyMsg').textContent = list.length ? '' : (activeTab === 'action' ? 'Nothing to send right now. 🎉' : 'No policies in this view.');
 
@@ -498,53 +528,62 @@ function render() {
 }
 
 /* ---------- messaging ---------- */
-function buildMsg(f, n) {
-  let t = n === 1 ? settings.t1 : settings.t2;
-  if (f.amount == null) t = t.replace(/ of RM\{amount\}/g, '').replace(/RM\{amount\}/g, 'the premium');
-  if (!f.name) t = t.replace(/Hi \{name\},/g, 'Hi,').replace(/\{name\}/g, 'there');
-  return t.replace(/\{name\}/g, f.name).replace(/\{policy\}/g, f.policy).replace(/\{amount\}/g, fmtRM(f.amount))
-    .replace(/\{due\}/g, fmtD(f.due)).replace(/\{days\}/g, f.days).replace(/\{agent\}/g, settings.agent);
+function buildMsg(g, n) {
+  const f = g.items[0], one = g.items.length === 1;
+  let t = one ? (n === 1 ? settings.t1 : settings.t2) : (n === 1 ? settings.t1m : settings.t2m);
+  if (!g.name) t = t.replace(/Hi \{name\},/g, 'Hi,').replace(/\{name\}/g, 'there');
+  if (one) {
+    if (f.amount == null) t = t.replace(/ of RM\{amount\}/g, '').replace(/RM\{amount\}/g, 'the premium');
+    return t.replace(/\{name\}/g, () => g.name).replace(/\{policy\}/g, () => f.policy).replace(/\{amount\}/g, () => fmtRM(f.amount))
+      .replace(/\{due\}/g, () => fmtD(f.due)).replace(/\{days\}/g, () => f.days).replace(/\{agent\}/g, () => settings.agent);
+  }
+  const lines = g.items.map(x => `• Policy ${x.policy}: ${x.amount != null ? 'RM' + fmtRM(x.amount) : 'amount to be confirmed'} (due ${fmtD(x.due)})`).join('\n');
+  if (g.total == null) t = t.replace(/\n*Total: RM\{total\}/g, '');
+  return t.replace(/\{name\}/g, () => g.name).replace(/\{policies\}/g, () => lines).replace(/\{total\}/g, () => fmtRM(g.total))
+    .replace(/\{count\}/g, () => g.items.length).replace(/\{agent\}/g, () => settings.agent);
 }
 
-function openSend(i, n) {
-  const f = flagged[i];
+function openSend(gi, n) {
+  const g = groups[gi], multi = g.items.length > 1;
   const m = document.getElementById('modal');
   m.innerHTML = `<div class="modal">
-    <h3>Reminder ${n} → ${esc(f.name || '(no name)')}</h3>
-    <div class="muted">+${f.phone} · Policy ${esc(f.policy)} · ${f.days} days since due</div>
-    ${f.warns.length ? `<div class="banner alert" style="margin:10px 0 0">⚠ This row has ${f.warns.join(' and ')}. Please check the message reads correctly.</div>` : ''}
+    <h3>Reminder ${n} → ${esc(g.name || '(no name)')}</h3>
+    <div class="muted">+${g.phone} · ${multi ? `${g.items.length} policies in one message` : `Policy ${esc(g.items[0].policy)}`} · ${multi ? 'up to ' : ''}${g.days} days since due</div>
+    ${g.warns.length ? `<div class="banner alert" style="margin:10px 0 0">⚠ ${g.warns.map(esc).join('<br>⚠ ')}<br>Please check before sending.</div>` : ''}
     <label class="f" style="margin-top:12px">Message (you can edit before sending)</label>
-    <textarea id="msgText" style="min-height:200px">${esc(buildMsg(f, n))}</textarea>
+    <textarea id="msgText" style="min-height:220px">${esc(buildMsg(g, n))}</textarea>
     <div class="row" id="step1" style="margin-top:12px;justify-content:flex-end">
       <button onclick="closeModal()">Cancel</button>
-      <button class="wa" onclick="goWA(${i},${n})">Open in WhatsApp</button>
+      <button class="wa" onclick="goWA(${gi},${n})">Open in WhatsApp</button>
     </div>
     <div class="hidden" id="step2" style="margin-top:12px">
       <div class="banner info">WhatsApp opened with the message ready. Press <b>Send</b> there, then come back and confirm.</div>
       <div class="row" style="justify-content:flex-end">
         <button onclick="closeModal()">I didn't send it</button>
-        <button class="primary" onclick="markSent(${i},${n})">✓ Yes, I sent it</button>
+        <button class="primary" onclick="markSent(${gi},${n})">✓ Yes, I sent it</button>
       </div>
     </div></div>`;
   m.classList.remove('hidden');
 }
 
-function goWA(i, n) {
-  const f = flagged[i], text = encodeURIComponent(document.getElementById('msgText').value);
+function goWA(gi, n) {
+  const g = groups[gi], text = encodeURIComponent(document.getElementById('msgText').value);
   // on a phone, wa.me opens the WhatsApp app directly
-  const url = IS_PHONE ? `https://wa.me/${f.phone}?text=${text}`
-    : settings.wa === 'app' ? `whatsapp://send?phone=${f.phone}&text=${text}` : `https://web.whatsapp.com/send?phone=${f.phone}&text=${text}`;
+  const url = IS_PHONE ? `https://wa.me/${g.phone}?text=${text}`
+    : settings.wa === 'app' ? `whatsapp://send?phone=${g.phone}&text=${text}` : `https://web.whatsapp.com/send?phone=${g.phone}&text=${text}`;
   window.open(url, 'np_whatsapp');
   hide('step1'); show('step2');
 }
 
-function markSent(i, n) {
-  const f = flagged[i], T = iso(today0());
-  log[f.key] = Object.assign(log[f.key] || {}, { name: f.name, phone: f.phone, ['r' + n]: T });
+function markSent(gi, n) {
+  const T = iso(today0());
+  for (const f of groups[gi].items) {
+    log[f.key] = Object.assign(log[f.key] || {}, { name: f.name, phone: f.phone, ['r' + n]: T });
+    f.log = log[f.key];
+    if (n === 1) { f.stage = 'waiting'; f.label = 'Reminder 1 sent today. Reminder 2 in 3+ days if still unpaid'; }
+    else { f.stage = 'done'; f.label = 'Both reminders sent. Call customer'; }
+  }
   LS.set('log', log);
-  f.log = log[f.key];
-  if (n === 1) { f.stage = 'waiting'; f.label = 'Reminder 1 sent today. Reminder 2 in 3+ days if still unpaid'; }
-  else { f.stage = 'done'; f.label = 'Both reminders sent. Call customer'; }
   closeModal(); render();
 }
 function closeModal() { hide('modal'); }
@@ -591,14 +630,14 @@ function downloadICS() {
 
 /* ---------- settings ---------- */
 function loadSettingsUI() {
-  sAgent.value = settings.agent; sWa.value = settings.wa; sDate.value = settings.date; sT1.value = settings.t1; sT2.value = settings.t2;
+  sAgent.value = settings.agent; sWa.value = settings.wa; sDate.value = settings.date; sT1.value = settings.t1; sT2.value = settings.t2; sT1M.value = settings.t1m; sT2M.value = settings.t2m;
 }
 function saveSettings() {
-  settings = { agent: sAgent.value.trim() || 'your agent', wa: sWa.value, date: sDate.value, t1: sT1.value, t2: sT2.value };
+  settings = { agent: sAgent.value.trim() || 'your agent', wa: sWa.value, date: sDate.value, t1: sT1.value, t2: sT2.value, t1m: sT1M.value, t2m: sT2M.value };
   LS.set('settings', settings); hide('settings');
   if (raw.rows.length && mapping.policy) analyse();
 }
-function resetTemplates() { sT1.value = DEFAULT_T1; sT2.value = DEFAULT_T2; }
+function resetTemplates() { sT1.value = DEFAULT_T1; sT2.value = DEFAULT_T2; sT1M.value = DEFAULT_T1M; sT2M.value = DEFAULT_T2M; }
 
 /* ---------- ui helpers ---------- */
 function show(id) { document.getElementById(id).classList.remove('hidden'); if (id === 'settings') { loadSettingsUI(); document.getElementById(id).scrollIntoView({ behavior: 'smooth' }); } }
