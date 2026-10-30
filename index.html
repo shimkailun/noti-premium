@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Noti-premium</title>
+<meta name="theme-color" content="#0f766e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --ink: #1c2330; --muted: #667085; --line: #e3e6ec;
+    --brand: #0f766e; --brand-ink: #ffffff; --brand-soft: #e6f4f2;
+    --r1: #b45309; --r1-soft: #fef3e2; --r2: #b42318; --r2-soft: #fdecea;
+    --ok: #067647; --ok-soft: #e7f6ee; --watch: #475467; --watch-soft: #eef0f3;
+    --wa: #1fa855;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 20px; margin: 0; letter-spacing: -0.2px; }
+  header h1 span { color: var(--brand); }
+  header .tag { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 60px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 4px; }
+  .card .sub { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 7px 14px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: #c5cad3; }
+  button.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+  button.wa { background: var(--wa); color: #fff; border-color: var(--wa); }
+  button.danger { color: var(--r2); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .drop { border: 2px dashed #c5cad3; border-radius: 12px; padding: 28px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop.over { border-color: var(--brand); background: var(--brand-soft); }
+  .drop strong { color: var(--ink); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .stat .n { font-size: 26px; font-weight: 650; }
+  .stat .l { color: var(--muted); font-size: 12.5px; }
+  .stat.r1 .n { color: var(--r1); } .stat.r2 .n { color: var(--r2); } .stat.ok .n { color: var(--ok); } .stat.bad .n { color: var(--r2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .3px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line); background: #fafbfc; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  .tablewrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .p-r1 { background: var(--r1-soft); color: var(--r1); } .p-r2 { background: var(--r2-soft); color: var(--r2); }
+  .p-watch { background: var(--watch-soft); color: var(--watch); } .p-ok { background: var(--ok-soft); color: var(--ok); }
+  .warn { color: var(--r1); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 20px; }
+  label.f { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+  select, input[type=text], textarea { font: inherit; width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+  textarea { min-height: 120px; resize: vertical; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .hidden { display: none !important; }
+  .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 13.5px; }
+  .banner.info { background: var(--brand-soft); color: #0b5951; }
+  .banner.alert { background: var(--r1-soft); color: #7a3e06; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(16,24,40,.45); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+  .modal { background: #fff; border-radius: 14px; width: min(560px, 100%); padding: 20px; max-height: 90vh; overflow: auto; }
+  .modal h3 { margin: 0 0 6px; font-size: 17px; }
+  .bubble { background: #dcf8c6; border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; font-size: 14px; margin: 10px 0; }
+  .chk { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .chk input { width: 16px; height: 16px; }
+  code { background: #f1f3f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  @media (max-width: 640px) { main { padding: 14px 16px 40px; } header { padding: 12px 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Noti-<span>premium</span></h1>
+  <div class="tag">Catch failed &amp; unallocated premiums. Remind on day 3 and day 7.</div>
+  <div class="spacer"></div>
+  <button onclick="downloadICS()" title="Adds a weekly Monday 9am reminder to your Mac Calendar">📅 Weekly reminder</button>
+  <button onclick="show('settings')">⚙️ Settings</button>
+</header>
+
+<main>
+  <div id="staleBanner" class="banner alert hidden"></div>
+
+  <!-- STEP 1: UPLOAD -->
+  <section class="card" id="uploadCard">
+    <h2>1. Upload this week's ePartner export</h2>
+    <p class="sub">ePartner → Application → Policy Enquiry → View All Policies → Export (Excel or CSV). Your file is read inside this browser only. It is never sent to GitHub or any server.</p>
+    <div class="drop" id="drop" onclick="document.getElementById('file').click()">
+      <strong>Drop the file here</strong> or click to choose · .xlsx / .xls / .csv
+      <div id="fileInfo" class="muted" style="margin-top:6px"></div>
+    </div>
+    <input type="file" id="file" accept=".xlsx,.xls,.csv" class="hidden">
+  </section>
+
+  <!-- STEP 2: CONFIRM MAPPING -->
+  <section class="card hidden" id="mapCard">
+    <h2>2. Confirm columns &amp; failed-payment statuses</h2>
+    <p class="sub">I matched your file's columns automatically. Check them. Nothing is flagged until you press <b>Confirm</b>. Your choices are remembered for next week.</p>
+    <div class="grid2" id="mapFields"></div>
+    <h3 style="font-size:14px;margin:18px 0 4px">Which payment statuses mean "unsuccessful / unallocated"?</h3>
+    <p class="sub" style="margin-bottom:6px">These are all the status values found in your file. Tick the ones that need a reminder.</p>
+    <div id="statusList" class="grid2"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="primary" onclick="confirmMapping()">Confirm &amp; find unpaid policies</button>
+      <span id="mapErr" class="warn"></span>
+    </div>
+  </section>
+
+  <!-- STEP 3: RESULTS -->
+  <section id="results" class="hidden">
+    <div class="stats" id="stats"></div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <h2 style="margin:0">3. Customers to notify</h2>
+        <div class="row">
+          <button onclick="exportWeekCSV()">⬇ Export this week's list</button>
+          <button onclick="show('mapCard')">Edit columns/statuses</button>
+        </div>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div class="tablewrap"><table id="tbl"></table></div>
+      <p class="muted" id="emptyMsg" style="margin:12px 0 0"></p>
+    </div>
+    <div class="card" id="issuesCard">
+      <h2>⚠️ Data issues: not messaged, please check in ePartner</h2>
+      <p class="sub">These rows are flagged as unpaid but have missing or unclear data. Noti-premium does not guess phone numbers or dates.</p>
+      <div class="tablewrap"><table id="issues"></table></div>
+    </div>
+    <div class="card" id="resolvedCard">
+      <h2>✅ Resolved since last reminder</h2>
+      <p class="sub">Policies you reminded before that no longer show as unsuccessful in this export, so the payment likely went through.</p>
+      <div class="tablewrap"><table id="resolved"></table></div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="card hidden" id="settings">
+    <div class="row" style="justify-content:space-between"><h2>Settings</h2><button onclick="hide('settings')">Close</button></div>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="f">Your name (used in messages)</label><input type="text" id="sAgent"></div>
+      <div><label class="f">Open WhatsApp in</label>
+        <select id="sWa"><option value="web">WhatsApp Web (Chrome tab)</option><option value="app">WhatsApp Desktop app</option></select></div>
+      <div><label class="f">Date format in your export (when ambiguous)</label>
+        <select id="sDate"><option value="dmy">DD/MM/YYYY (Malaysia)</option><option value="mdy">MM/DD/YYYY</option></select></div>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:12px 0 4px">Placeholders: <code>{name}</code> <code>{policy}</code> <code>{amount}</code> <code>{due}</code> <code>{days}</code> <code>{agent}</code></p>
+    <label class="f">Reminder 1 (day 3+)</label><textarea id="sT1"></textarea>
+    <label class="f" style="margin-top:10px">Reminder 2 (day 7+)</label><textarea id="sT2"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" onclick="saveSettings()">Save settings</button>
+      <button onclick="resetTemplates()">Restore default messages</button>
+      <span class="spacer" style="flex:1"></span>
+      <button onclick="exportLog()">⬇ Back up reminder log</button>
+      <button onclick="document.getElementById('logIn').click()">⬆ Restore log</button>
+      <input type="file" id="logIn" accept=".json" class="hidden">
+      <button class="danger" onclick="clearLog()">Clear reminder log…</button>
+    </div>
+  </section>
+</main>
+
+<div id="modal" class="modal-bg hidden"></div>
+
+<script>
+/* ---------- storage ---------- */
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('np_' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('np_' + k, JSON.stringify(v)); } catch (e) { alert('Could not save to browser storage: ' + e.message); } }
+};
+
+const DEFAULT_T1 = "Hi {name}, this is {agent}, your insurance agent. Just a friendly reminder that the premium of RM{amount} for your policy {policy} (due {due}) has not been successfully received yet.\n\nTo keep your coverage active and avoid an outstanding amount building up on your policy, please make the payment at your earliest convenience, or let me know if your payment method needs updating. I'm happy to help.\n\nIf you have already paid, please ignore this message. Thank you!";
+const DEFAULT_T2 = "Following up on my earlier reminder: the premium of RM{amount} for your policy {policy}, due on {due}, is still showing as unsuccessful ({days} days now).\n\nAn unpaid premium can create a debt on your policy and may affect your coverage. Could you please arrange payment soon? If you have already paid, kindly notify me so that I can check it has been allocated correctly to your policy.\n\nThank you, and feel free to call or message me if you need any help.";
+
+let settings = Object.assign({ agent: 'Kai Lun', wa: 'web', date: 'dmy', t1: DEFAULT_T1, t2: DEFAULT_T2 }, LS.get('settings', {}));
+let log = LS.get('log', {});          // key: policy|dueISO -> {name, phone, r1, r2}
+let mapping = LS.get('mapping', {});  // field -> header name
+let failStatuses = LS.get('failStatuses', null);
+
+let raw = { headers: [], rows: [], fileName: '' };
+let flagged = [], issues = [], resolved = [], activeTab = 'action';
+
+/* ---------- fields & auto-detection ---------- */
+const FIELDS = [
+  { key: 'policy', label: 'Policy number', req: true, syn: ['policy no', 'policy number', 'policy num', 'policyno', 'policy', 'contract no', 'cert no'] },
+  { key: 'name', label: 'Customer name', req: false, syn: ['policy owner', 'owner name', 'customer name', 'client name', 'insured name', 'policyholder', 'name', 'owner', 'customer', 'client'] },
+  { key: 'phone', label: 'Mobile number', req: true, syn: ['mobile', 'handphone', 'hp no', 'hp', 'phone', 'contact no', 'contact', 'tel', 'cell'] },
+  { key: 'amount', label: 'Premium amount (RM)', req: false, syn: ['outstanding premium', 'premium due', 'modal premium', 'premium amount', 'installment premium', 'amount due', 'premium', 'amount'] },
+  { key: 'due', label: 'Premium due date', req: true, syn: ['next due date', 'premium due date', 'due date', 'paid to date', 'ptd', 'next due', 'due'] },
+  { key: 'status', label: 'Payment status', req: true, syn: ['payment status', 'premium status', 'billing status', 'collection status', 'deduction status', 'policy status', 'status'] }
+];
+const FAIL_HINTS = ['unsuccess', 'fail', 'unalloc', 'suspense', 'reject', 'bounce', 'overdue', 'outstanding', 'due', 'unpaid', 'insufficient', 'declin', 'grace', 'return'];
+
+const norm = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function autoMap(headers) {
+  const used = new Set(), m = {};
+  for (const f of FIELDS) {
+    if (mapping[f.key] && headers.includes(mapping[f.key])) { m[f.key] = mapping[f.key]; used.add(mapping[f.key]); continue; }
+    let best = null, bestScore = 0;
+    for (const h of headers) {
+      if (used.has(h)) continue;
+      const nh = norm(h);
+      f.syn.forEach((s, i) => {
+        const score = nh === s ? 100 - i : (nh.includes(s) ? 50 - i : 0);
+        if (score > bestScore) { bestScore = score; best = h; }
+      });
+    }
+    if (best) { m[f.key] = best; used.add(best); }
+  }
+  return m;
+}
+
+/* find the real header row (exports often have title lines above the table) */
+function findHeaderRow(aoa) {
+  let bestIdx = 0, bestScore = -1;
+  for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+    const cells = (aoa[i] || []).map(norm).filter(Boolean);
+    let score = 0;
+    for (const f of FIELDS) if (cells.some(c => f.syn.some(s => c.includes(s)))) score++;
+    if (score > bestScore) { bestScore = score; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+/* ---------- file loading ---------- */
+const fileEl = document.getElementById('file'), drop = document.getElementById('drop');
+fileEl.addEventListener('change', e => e.target.files[0] && readFile(e.target.files[0]));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && readFile(e.dataTransfer.files[0]); });
+
+function readFile(file) {
+  if (typeof XLSX === 'undefined') { alert('The Excel reader could not load. Reload this page while online once.'); return; }
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false, raw: true });
+      loadWorkbook(wb, file.name);
+    } catch (err) { alert('Could not read this file: ' + err.message); }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+function loadWorkbook(wb, fileName) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+  const hi = findHeaderRow(aoa);
+  const headers = (aoa[hi] || []).map((h, i) => String(h).trim() || ('Column ' + (i + 1)));
+  const rows = aoa.slice(hi + 1)
+    .filter(r => r.some(c => String(c).trim() !== ''))
+    .map((r, idx) => { const o = { _row: hi + idx + 2 }; headers.forEach((h, i) => o[h] = r[i]); return o; });
+  raw = { headers, rows, fileName };
+  document.getElementById('fileInfo').textContent = `Loaded "${fileName}" · sheet "${wb.SheetNames[0]}" · ${rows.length} policies`;
+  buildMappingUI();
+}
+
+/* ---------- mapping UI ---------- */
+function buildMappingUI() {
+  const m = autoMap(raw.headers);
+  document.getElementById('mapFields').innerHTML = FIELDS.map(f => `
+    <div><label class="f">${f.label}${f.req ? ' *' : ' (optional)'}</label>
+    <select id="map_${f.key}" onchange="buildStatusList()">
+      <option value="">— not in file —</option>
+      ${raw.headers.map(h => `<option ${m[f.key] === h ? 'selected' : ''}>${esc(h)}</option>`).join('')}
+    </select></div>`).join('');
+  buildStatusList();
+  show('mapCard'); hide('results');
+  document.getElementById('mapCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function buildStatusList() {
+  const col = document.getElementById('map_status').value;
+  const box = document.getElementById('statusList');
+  if (!col) { box.innerHTML = '<span class="muted">Choose the Payment status column first.</span>'; return; }
+  const counts = {};
+  raw.rows.forEach(r => { const v = String(r[col] ?? '').trim() || '(blank)'; counts[v] = (counts[v] || 0) + 1; });
+  const vals = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  box.innerHTML = vals.map((v, i) => {
+    const on = failStatuses ? failStatuses.includes(v) : (v !== '(blank)' && FAIL_HINTS.some(h => norm(v).includes(h)) && !/^(paid|in force|inforce|active|success)/.test(norm(v)));
+    return `<label class="chk"><input type="checkbox" data-v="${esc(v)}" ${on ? 'checked' : ''}> ${esc(v)} <span class="muted">(${counts[v]})</span></label>`;
+  }).join('');
+}
+
+function confirmMapping() {
+  const m = {}; let missing = [];
+  FIELDS.forEach(f => { const v = document.getElementById('map_' + f.key).value; if (v) m[f.key] = v; else if (f.req) missing.push(f.label); });
+  const picked = [...document.querySelectorAll('#statusList input:checked')].map(i => i.dataset.v);
+  const err = document.getElementById('mapErr');
+  if (missing.length) { err.textContent = 'Please choose a column for: ' + missing.join(', '); return; }
+  if (!picked.length) { err.textContent = 'Tick at least one status that means unsuccessful/unallocated.'; return; }
+  err.textContent = '';
+  mapping = m; failStatuses = picked;
+  LS.set('mapping', mapping); LS.set('failStatuses', failStatuses);
+  analyse();
+}
+
+/* ---------- cleaning helpers ---------- */
+function parsePhone(v) {
+  let d = String(v ?? '').split(/[\/,;]| or /i)[0].replace(/\D/g, '');   // first number if several
+  if (!d) return { err: 'No mobile number' };
+  if (d.startsWith('0060')) d = d.slice(2);
+  if (/^0[1-9]/.test(d)) d = '6' + d;
+  if (d.startsWith('1') && (d.length === 9 || d.length === 10)) d = '60' + d;
+  if (/^601\d{8,9}$/.test(d)) {
+    if (/^601\d(\d)\1{6,}$/.test(d)) return { err: 'Placeholder number (' + v + ')' };
+    return { ok: d };
+  }
+  if (/^60[3-9]\d{7,8}$/.test(d)) return { err: 'Looks like a landline (' + v + '), WhatsApp needs a mobile' };
+  if (/^(65|62|66|63|86|852|61|44|1)\d{7,11}$/.test(d) && !d.startsWith('60')) return { err: 'Foreign number (' + v + '), check country code before sending' };
+  return { err: 'Unclear mobile number (' + v + ')' };
+}
+
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function parseDate(v) {
+  if (v === '' || v == null) return { err: 'No due date' };
+  if (typeof v === 'number') {                         // Excel serial date
+    if (v < 20000 || v > 80000) return { err: 'Unclear due date (' + v + ')' };
+    const d = new Date(Math.round((v - 25569) * 864e5)); return { ok: new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) };
+  }
+  if (v instanceof Date) return { ok: new Date(v.getFullYear(), v.getMonth(), v.getDate()) };
+  const s = String(v).trim();
+  let y, mo, da, m;
+  if ((m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/))) { y = +m[1]; mo = +m[2]; da = +m[3]; }
+  else if ((m = s.match(/^(\d{1,2})[-\/. ]([A-Za-z]{3})[A-Za-z]*[-\/. ,]+(\d{2,4})/))) { da = +m[1]; mo = MONTHS[m[2].toLowerCase()]; y = +m[3]; }
+  else if ((m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/))) {
+    let a = +m[1], b = +m[2]; y = +m[3];
+    if (settings.date === 'mdy') [a, b] = [b, a];
+    da = a; mo = b;
+  } else return { err: 'Unclear due date (' + s + ')' };
+  if (y < 100) y += 2000;
+  const d = new Date(y, mo - 1, da);
+  if (!mo || d.getMonth() !== mo - 1 || d.getDate() !== da) return { err: 'Invalid due date (' + s + ')' };
+  return { ok: d };
+}
+
+function parseAmount(v) {
+  if (v === '' || v == null) return null;
+  const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+  return isFinite(n) && n > 0 ? n : null;
+}
+
+const today0 = () => { const t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); };
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const fmtD = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtRM = n => n == null ? '' : n.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const titleCase = s => String(s).toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(Bin|Binti|A\/L|A\/P|Bt|Bte)\b/g, w => w.toLowerCase());
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- core logic ---------- */
+function analyse() {
+  const T = today0(); flagged = []; issues = [];
+  const seen = {};
+  const failSet = new Set(failStatuses);
+  const currentKeys = new Set();
+
+  for (const r of raw.rows) {
+    const status = String(r[mapping.status] ?? '').trim() || '(blank)';
+    if (!failSet.has(status)) continue;
+    const policy = String(r[mapping.policy] ?? '').trim();
+    const name = mapping.name ? String(r[mapping.name] ?? '').trim() : '';
+    const probs = [];
+    if (!policy) probs.push('No policy number');
+    const ph = parsePhone(r[mapping.phone]); if (ph.err) probs.push(ph.err);
+    const dd = parseDate(r[mapping.due]); if (dd.err) probs.push(dd.err);
+    if (policy) { if (seen[policy]) probs.push('Duplicate policy row (also row ' + seen[policy] + ')'); else seen[policy] = r._row; }
+    if (probs.length) { issues.push({ row: r._row, policy, name, status, probs }); continue; }
+
+    const amount = mapping.amount ? parseAmount(r[mapping.amount]) : null;
+    const days = Math.round((T - dd.ok) / 864e5);
+    const key = policy + '|' + iso(dd.ok);
+    currentKeys.add(key);
+    const L = log[key] || {};
+    let stage, label;
+    if (days < 0) { stage = 'watch'; label = `Not due yet (due in ${-days} day${days === -1 ? '' : 's'})`; }
+    else if (days < 3) { stage = 'watch'; label = `Watch: reminder in ${3 - days} day${3 - days === 1 ? '' : 's'}`; }
+    else if (days < 7) { stage = L.r1 ? 'waiting' : 'r1'; label = L.r1 ? 'Reminder 1 sent, Reminder 2 on day 7' : 'Send Reminder 1'; }
+    else { stage = L.r2 ? 'done' : 'r2'; label = L.r2 ? 'Both reminders sent. Call customer' : 'Send Reminder 2'; }
+    const warns = [];
+    if (!name) warns.push('no name');
+    if (amount == null) warns.push('no amount');
+    flagged.push({ key, policy, name: name ? titleCase(name) : '', phone: ph.ok, amount, due: dd.ok, days, status, stage, label, log: L, warns });
+  }
+  flagged.sort((a, b) => b.days - a.days);
+
+  // resolved: reminded before, not unpaid any more in this export
+  const allPolicies = new Set(raw.rows.map(r => String(r[mapping.policy] ?? '').trim()));
+  resolved = Object.entries(log)
+    .filter(([k, v]) => !currentKeys.has(k) && !v.resolved && allPolicies.has(k.split('|')[0]) && !issues.some(i => i.policy === k.split('|')[0]))
+    .map(([k, v]) => ({ key: k, policy: k.split('|')[0], due: k.split('|')[1], ...v }));
+  resolved.forEach(r => { log[r.key].resolved = iso(T); });
+  LS.set('log', log);
+  LS.set('lastRun', iso(T));
+
+  hide('mapCard'); show('results');
+  activeTab = flagged.some(f => f.stage === 'r1' || f.stage === 'r2') ? 'action' : 'all';
+  render();
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function render() {
+  const c = s => flagged.filter(f => f.stage === s).length;
+  const outstanding = flagged.reduce((s, f) => s + (f.amount || 0), 0);
+  document.getElementById('stats').innerHTML = `
+    <div class="stat r1"><div class="n">${c('r1')}</div><div class="l">Reminder 1 to send (day 3+)</div></div>
+    <div class="stat r2"><div class="n">${c('r2')}</div><div class="l">Reminder 2 to send (day 7+)</div></div>
+    <div class="stat"><div class="n">${flagged.length}</div><div class="l">Unpaid policies · RM ${fmtRM(outstanding)}</div></div>
+    <div class="stat bad"><div class="n">${issues.length}</div><div class="l">Data issues to check</div></div>
+    <div class="stat ok"><div class="n">${resolved.length}</div><div class="l">Resolved since last reminder</div></div>`;
+
+  const tabs = [['action', 'To send now', c('r1') + c('r2')], ['all', 'All unpaid', flagged.length], ['watch', 'Watching (<3 days)', c('watch')], ['sent', 'Already reminded', c('waiting') + c('done')]];
+  document.getElementById('tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${k === activeTab ? 'on' : ''}" onclick="activeTab='${k}';render()">${l} (${n})</button>`).join('');
+
+  const list = flagged.filter(f => activeTab === 'all' ? true : activeTab === 'action' ? (f.stage === 'r1' || f.stage === 'r2') : activeTab === 'watch' ? f.stage === 'watch' : (f.stage === 'waiting' || f.stage === 'done'));
+  const pc = { r1: 'p-r1', r2: 'p-r2', watch: 'p-watch', waiting: 'p-watch', done: 'p-ok' };
+  document.getElementById('tbl').innerHTML = `<tr><th>Customer</th><th>Policy</th><th>Premium</th><th>Due date</th><th>Days</th><th>ePartner status</th><th>Next step</th><th></th></tr>` +
+    list.map(f => {
+      const i = flagged.indexOf(f);
+      const sentInfo = [f.log.r1 && 'R1 ' + f.log.r1, f.log.r2 && 'R2 ' + f.log.r2].filter(Boolean).join(' · ');
+      const btn = f.stage === 'r1' ? `<button class="wa" onclick="openSend(${i},1)">WhatsApp R1</button>`
+        : f.stage === 'r2' ? `<button class="wa" onclick="openSend(${i},2)">WhatsApp R2</button>`
+        : f.stage === 'done' ? `<a class="btn" href="tel:+${f.phone}">📞 Call</a>` : '';
+      return `<tr><td><b>${esc(f.name || '(no name)')}</b><br><span class="muted">+${f.phone}</span>${f.warns.length ? `<br><span class="warn">⚠ ${f.warns.join(', ')}</span>` : ''}</td>
+        <td>${esc(f.policy)}</td><td>${f.amount != null ? 'RM ' + fmtRM(f.amount) : '<span class="muted">n/a</span>'}</td>
+        <td>${fmtD(f.due)}</td><td><b>${f.days}</b></td><td>${esc(f.status)}</td>
+        <td><span class="pill ${pc[f.stage]}">${f.label}</span>${sentInfo ? `<br><span class="muted" style="font-size:12px">${sentInfo}</span>` : ''}</td><td>${btn}</td></tr>`;
+    }).join('');
+  document.getElementById('emptyMsg').textContent = list.length ? '' : (activeTab === 'action' ? 'Nothing to send right now. 🎉' : 'No policies in this view.');
+
+  document.getElementById('issuesCard').classList.toggle('hidden', !issues.length);
+  document.getElementById('issues').innerHTML = `<tr><th>File row</th><th>Policy</th><th>Customer</th><th>Status</th><th>Problem</th></tr>` +
+    issues.map(x => `<tr><td>${x.row}</td><td>${esc(x.policy || '—')}</td><td>${esc(x.name || '—')}</td><td>${esc(x.status)}</td><td class="warn">${x.probs.map(esc).join('<br>')}</td></tr>`).join('');
+
+  document.getElementById('resolvedCard').classList.toggle('hidden', !resolved.length);
+  document.getElementById('resolved').innerHTML = `<tr><th>Customer</th><th>Policy</th><th>Was due</th><th>Reminders sent</th></tr>` +
+    resolved.map(x => `<tr><td>${esc(x.name || '')}</td><td>${esc(x.policy)}</td><td>${x.due}</td><td>${[x.r1 && 'R1 ' + x.r1, x.r2 && 'R2 ' + x.r2].filter(Boolean).join(' · ')}</td></tr>`).join('');
+}
+
+/* ---------- messaging ---------- */
+function buildMsg(f, n) {
+  let t = n === 1 ? settings.t1 : settings.t2;
+  if (f.amount == null) t = t.replace(/ of RM\{amount\}/g, '').replace(/RM\{amount\}/g, 'the premium');
+  if (!f.name) t = t.replace(/Hi \{name\},/g, 'Hi,').replace(/\{name\}/g, 'there');
+  return t.replace(/\{name\}/g, f.name).replace(/\{policy\}/g, f.policy).replace(/\{amount\}/g, fmtRM(f.amount))
+    .replace(/\{due\}/g, fmtD(f.due)).replace(/\{days\}/g, f.days).replace(/\{agent\}/g, settings.agent);
+}
+
+function openSend(i, n) {
+  const f = flagged[i];
+  const m = document.getElementById('modal');
+  m.innerHTML = `<div class="modal">
+    <h3>Reminder ${n} → ${esc(f.name || '(no name)')}</h3>
+    <div class="muted">+${f.phone} · Policy ${esc(f.policy)} · ${f.days} days since due</div>
+    ${f.warns.length ? `<div class="banner alert" style="margin:10px 0 0">⚠ This row has ${f.warns.join(' and ')}. Please check the message reads correctly.</div>` : ''}
+    <label class="f" style="margin-top:12px">Message (you can edit before sending)</label>
+    <textarea id="msgText" style="min-height:200px">${esc(buildMsg(f, n))}</textarea>
+    <div class="row" id="step1" style="margin-top:12px;justify-content:flex-end">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="wa" onclick="goWA(${i},${n})">Open in WhatsApp</button>
+    </div>
+    <div class="hidden" id="step2" style="margin-top:12px">
+      <div class="banner info">WhatsApp opened with the message ready. Press <b>Send</b> there, then come back and confirm.</div>
+      <div class="row" style="justify-content:flex-end">
+        <button onclick="closeModal()">I didn't send it</button>
+        <button class="primary" onclick="markSent(${i},${n})">✓ Yes, I sent it</button>
+      </div>
+    </div></div>`;
+  m.classList.remove('hidden');
+}
+
+function goWA(i, n) {
+  const f = flagged[i], text = encodeURIComponent(document.getElementById('msgText').value);
+  const url = settings.wa === 'app' ? `whatsapp://send?phone=${f.phone}&text=${text}` : `https://web.whatsapp.com/send?phone=${f.phone}&text=${text}`;
+  window.open(url, 'np_whatsapp');
+  hide('step1'); show('step2');
+}
+
+function markSent(i, n) {
+  const f = flagged[i], T = iso(today0());
+  log[f.key] = Object.assign(log[f.key] || {}, { name: f.name, phone: f.phone, ['r' + n]: T });
+  LS.set('log', log);
+  f.log = log[f.key];
+  if (n === 1) { f.stage = 'waiting'; f.label = 'Reminder 1 sent, Reminder 2 on day 7'; }
+  else { f.stage = 'done'; f.label = 'Both reminders sent. Call customer'; }
+  closeModal(); render();
+}
+function closeModal() { hide('modal'); }
+
+/* ---------- exports ---------- */
+function download(name, content, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click();
+}
+function exportWeekCSV() {
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const rows = [['Customer', 'Mobile', 'Policy', 'Premium RM', 'Due date', 'Days', 'ePartner status', 'Next step', 'R1 sent', 'R2 sent']]
+    .concat(flagged.map(f => [f.name, '+' + f.phone, f.policy, f.amount ?? '', iso(f.due), f.days, f.status, f.label, f.log.r1 || '', f.log.r2 || '']))
+    .concat(issues.map(x => ['DATA ISSUE: ' + (x.name || ''), '', x.policy, '', '', '', x.status, x.probs.join('; '), '', '']));
+  download(`Noti-premium_${iso(today0())}.csv`, rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv');
+}
+function exportLog() { download(`Noti-premium_log_${iso(today0())}.json`, JSON.stringify(log, null, 1), 'application/json'); }
+document.getElementById('logIn').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    const data = JSON.parse(t);
+    if (confirm(`Restore ${Object.keys(data).length} reminder records? This will merge with the ${Object.keys(log).length} records already on this Mac.`)) {
+      log = Object.assign({}, log, data); LS.set('log', log); alert('Log restored.'); if (raw.rows.length) analyse();
+    }
+  }).catch(err => alert('Could not read log: ' + err.message));
+});
+function clearLog() {
+  if (!confirm('Delete the record of ALL reminders sent? Customers may then receive duplicate reminders. Back up first if unsure.')) return;
+  if (!confirm('Are you sure? This cannot be undone.')) return;
+  log = {}; LS.set('log', log); if (raw.rows.length) analyse();
+}
+
+function downloadICS() {
+  const d = new Date(); d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
+  const ds = iso(d).replace(/-/g, '');
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Noti-premium//EN', 'BEGIN:VEVENT',
+    'UID:noti-premium-weekly@local', `DTSTAMP:${ds}T000000Z`, `DTSTART:${ds}T090000`, `DTEND:${ds}T093000`, 'RRULE:FREQ=WEEKLY;BYDAY=MO',
+    'SUMMARY:Noti-premium: check unpaid premiums',
+    'DESCRIPTION:1) Export View All Policies from ePartner. 2) Open the Noti-premium app and drop the file in. 3) Send the WhatsApp reminders.',
+    'URL:' + location.href.split('#')[0],
+    'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:Noti-premium weekly check', 'END:VALARM',
+    'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+  download('Noti-premium weekly reminder.ics', ics, 'text/calendar');
+}
+
+/* ---------- settings ---------- */
+function loadSettingsUI() {
+  sAgent.value = settings.agent; sWa.value = settings.wa; sDate.value = settings.date; sT1.value = settings.t1; sT2.value = settings.t2;
+}
+function saveSettings() {
+  settings = { agent: sAgent.value.trim() || 'your agent', wa: sWa.value, date: sDate.value, t1: sT1.value, t2: sT2.value };
+  LS.set('settings', settings); hide('settings');
+  if (raw.rows.length && mapping.policy) analyse();
+}
+function resetTemplates() { sT1.value = DEFAULT_T1; sT2.value = DEFAULT_T2; }
+
+/* ---------- ui helpers ---------- */
+function show(id) { document.getElementById(id).classList.remove('hidden'); if (id === 'settings') { loadSettingsUI(); document.getElementById(id).scrollIntoView({ behavior: 'smooth' }); } }
+function hide(id) { document.getElementById(id).classList.add('hidden'); }
+
+(function staleCheck() {
+  const last = LS.get('lastRun', null), b = document.getElementById('staleBanner');
+  if (!last) { b.className = 'banner info'; b.textContent = 'Welcome! Start by uploading your ePartner "View All Policies" export below.'; return; }
+  const days = Math.round((today0() - new Date(last + 'T00:00:00')) / 864e5);
+  if (days >= 7) { b.className = 'banner alert'; b.textContent = `Last check was ${days} days ago (${last}). Upload this week's export so no customer slips past day 3 or day 7.`; }
+})();
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
