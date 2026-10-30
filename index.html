@@ -113,7 +113,7 @@
     <p class="sub">No file needed. You log in to ePartner yourself, then one click brings everything here: View all policies, plus each overdue customer's mobile number, overdue amount, suspense and lapse date. Your own policies are skipped. Data goes only from ePartner to this page in your browser.</p>
     <div class="row" style="margin-bottom:10px">
       <a class="btn" style="background:var(--brand);color:#fff;border-color:var(--brand);text-decoration:none;padding:10px 16px" href="https://epartner-my.greateasternlife.com/" target="_blank" rel="noopener">🔐 Step 1: Log in to ePartner</a>
-      <span class="muted">→ then <b>Step 2:</b> on any ePartner page, click <b>📥 Noti-premium</b> in your bookmarks bar.</span>
+      <span class="muted">→ With the <b>Noti-premium Chrome extension</b>, your list opens here by itself after you log in. Without it, click <b>📥 Noti-premium</b> in your bookmarks bar on the ePartner home page.</span>
     </div>
     <details id="bmSetup" style="margin-bottom:14px">
       <summary><b>One-time setup: add the 📥 Noti-premium bookmark</b> (Chrome on your computer)</summary>
@@ -565,7 +565,8 @@ function openSend(gi, n) {
       <div class="banner info">WhatsApp opened with the message ready. Press <b>Send</b> there, then come back and confirm.</div>
       <div class="row" style="justify-content:flex-end">
         <button onclick="closeModal()">I didn't send it</button>
-        <button class="primary" onclick="markSent(${gi},${n})">✓ Yes, I sent it</button>
+        <button onclick="markSent(${gi},${n})">✓ Sent, close</button>
+        <button class="primary" onclick="markSent(${gi},${n},true)">✓ Sent, next customer →</button>
       </div>
     </div></div>`;
   m.classList.remove('hidden');
@@ -580,7 +581,7 @@ function goWA(gi, n) {
   hide('step1'); show('step2');
 }
 
-function markSent(gi, n) {
+function markSent(gi, n, next) {
   const T = iso(today0());
   for (const f of groups[gi].items) {
     log[f.key] = Object.assign(log[f.key] || {}, { name: f.name, phone: f.phone, ['r' + n]: T });
@@ -590,6 +591,9 @@ function markSent(gi, n) {
   }
   LS.set('log', log);
   closeModal(); render();
+  // straight on to the next customer still waiting for a reminder, so you only review and press Send
+  const ni = next ? groups.findIndex(g => g.stage === 'r1' || g.stage === 'r2') : -1;
+  if (ni >= 0) openSend(ni, groups[ni].stage === 'r1' ? 1 : 2);
 }
 function closeModal() { hide('modal'); }
 
@@ -754,14 +758,20 @@ async function NP_COLLECT(testMode) {
 document.getElementById('collectorLink').href = 'javascript:' + encodeURIComponent('(' + NP_COLLECT.toString() + ')()');
 
 /* ---------- receive the list straight from the ePartner bookmark (no file) ---------- */
-if (window.opener && location.hash === '#epartner') {
+// '#epartner' = opened by the bookmark; '#extension' = opened by the Noti-premium Chrome extension after login
+const VIA_EXT = location.hash === '#extension';
+if ((window.opener && location.hash === '#epartner') || VIA_EXT) {
   const EPARTNER = 'https://epartner-my.greateasternlife.com';
   const fileInfo = document.getElementById('fileInfo');
   fileInfo.textContent = 'Waiting for ePartner… (keep the ePartner tab open)';
-  const ping = setInterval(() => { try { window.opener.postMessage({ type: 'np-ready' }, EPARTNER); } catch (e) {} }, 700);
-  setTimeout(() => clearInterval(ping), 5 * 60000);
+  const ping = VIA_EXT ? null : setInterval(() => { try { window.opener.postMessage({ type: 'np-ready' }, EPARTNER); } catch (e) {} }, 700);
+  if (ping) setTimeout(() => clearInterval(ping), 5 * 60000);
+  if (VIA_EXT) setTimeout(() => { if (!raw.rows.length) fileInfo.textContent = 'No list arrived from the extension. Click the Noti-premium icon in Chrome\'s toolbar while on ePartner to try again.'; }, 8000);
   window.addEventListener('message', e => {
-    if (e.origin !== EPARTNER || !e.data || e.data.type !== 'np-data') return;
+    if (!e.data || e.data.type !== 'np-data') return;
+    const fromBookmark = e.origin === EPARTNER;
+    const fromExtension = VIA_EXT && e.origin === location.origin && e.source === window && e.data.via === 'extension';
+    if (!fromBookmark && !fromExtension) return;
     clearInterval(ping);
     history.replaceState(null, '', location.pathname);
     const rows = e.data.rows || [];
