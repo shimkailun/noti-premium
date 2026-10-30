@@ -7,7 +7,11 @@
 <meta name="theme-color" content="#0f766e">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Noti-premium">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
@@ -74,7 +78,19 @@
   .chk { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
   .chk input { width: 16px; height: 16px; }
   code { background: #f1f3f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
-  @media (max-width: 640px) { main { padding: 14px 16px 40px; } header { padding: 12px 16px; } }
+  @media (max-width: 640px) {
+    main { padding: 14px 16px 40px; } header { padding: 12px 16px; gap: 8px; } header .tag { display: none; }
+    .card { padding: 14px; }
+    /* customer list becomes one card per customer on phones */
+    #tbl tr:first-child { display: none; }
+    #tbl tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    #tbl td { border: 0; padding: 0; }
+    #tbl td[data-l]::before { content: attr(data-l); display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+    #tbl td.c-name, #tbl td.c-step, #tbl td.c-btn { grid-column: 1 / -1; }
+    #tbl td.c-btn button, #tbl td.c-btn .btn { width: 100%; text-align: center; padding: 10px; display: block; }
+    .modal-bg { align-items: flex-end; padding: 0; } .modal { border-radius: 14px 14px 0 0; }
+  }
+  @media (display-mode: standalone) { header { padding-top: max(14px, env(safe-area-inset-top)); } }
 </style>
 </head>
 <body>
@@ -82,11 +98,13 @@
   <h1>Noti-<span>premium</span></h1>
   <div class="tag">Catch failed &amp; unallocated premiums. Remind on day 3 and day 7.</div>
   <div class="spacer"></div>
-  <button onclick="downloadICS()" title="Adds a weekly Monday 9am reminder to your Mac Calendar">📅 Weekly reminder</button>
+  <button id="installBtn" class="primary hidden" onclick="installApp()">📲 Install app</button>
+  <button onclick="downloadICS()" title="Adds a weekly Monday 9am reminder to your calendar">📅 Weekly reminder</button>
   <button onclick="show('settings')">⚙️ Settings</button>
 </header>
 
 <main>
+  <div id="iosHint" class="banner info hidden">📲 <b>Save to your iPhone home screen:</b> tap the <b>Share</b> button <span aria-hidden="true">⬆︎</span> in Safari, then <b>Add to Home Screen</b>. <a href="#" onclick="dismissIosHint();return false">Dismiss</a></div>
   <div id="staleBanner" class="banner alert hidden"></div>
 
   <!-- STEP 1: UPLOAD -->
@@ -185,6 +203,7 @@ let failStatuses = LS.get('failStatuses', null);
 
 let raw = { headers: [], rows: [], fileName: '' };
 let flagged = [], issues = [], resolved = [], activeTab = 'action';
+const IS_PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 /* ---------- fields & auto-detection ---------- */
 const FIELDS = [
@@ -426,10 +445,10 @@ function render() {
       const btn = f.stage === 'r1' ? `<button class="wa" onclick="openSend(${i},1)">WhatsApp R1</button>`
         : f.stage === 'r2' ? `<button class="wa" onclick="openSend(${i},2)">WhatsApp R2</button>`
         : f.stage === 'done' ? `<a class="btn" href="tel:+${f.phone}">📞 Call</a>` : '';
-      return `<tr><td><b>${esc(f.name || '(no name)')}</b><br><span class="muted">+${f.phone}</span>${f.warns.length ? `<br><span class="warn">⚠ ${f.warns.join(', ')}</span>` : ''}</td>
-        <td>${esc(f.policy)}</td><td>${f.amount != null ? 'RM ' + fmtRM(f.amount) : '<span class="muted">n/a</span>'}</td>
-        <td>${fmtD(f.due)}</td><td><b>${f.days}</b></td><td>${esc(f.status)}</td>
-        <td><span class="pill ${pc[f.stage]}">${f.label}</span>${sentInfo ? `<br><span class="muted" style="font-size:12px">${sentInfo}</span>` : ''}</td><td>${btn}</td></tr>`;
+      return `<tr><td class="c-name"><b>${esc(f.name || '(no name)')}</b><br><span class="muted">+${f.phone}</span>${f.warns.length ? `<br><span class="warn">⚠ ${f.warns.join(', ')}</span>` : ''}</td>
+        <td data-l="Policy">${esc(f.policy)}</td><td data-l="Premium">${f.amount != null ? 'RM ' + fmtRM(f.amount) : '<span class="muted">n/a</span>'}</td>
+        <td data-l="Due date">${fmtD(f.due)}</td><td data-l="Days"><b>${f.days}</b></td><td data-l="ePartner status">${esc(f.status)}</td>
+        <td class="c-step"><span class="pill ${pc[f.stage]}">${f.label}</span>${sentInfo ? `<br><span class="muted" style="font-size:12px">${sentInfo}</span>` : ''}</td><td class="c-btn">${btn}</td></tr>`;
     }).join('');
   document.getElementById('emptyMsg').textContent = list.length ? '' : (activeTab === 'action' ? 'Nothing to send right now. 🎉' : 'No policies in this view.');
 
@@ -476,7 +495,9 @@ function openSend(i, n) {
 
 function goWA(i, n) {
   const f = flagged[i], text = encodeURIComponent(document.getElementById('msgText').value);
-  const url = settings.wa === 'app' ? `whatsapp://send?phone=${f.phone}&text=${text}` : `https://web.whatsapp.com/send?phone=${f.phone}&text=${text}`;
+  // on a phone, wa.me opens the WhatsApp app directly
+  const url = IS_PHONE ? `https://wa.me/${f.phone}?text=${text}`
+    : settings.wa === 'app' ? `whatsapp://send?phone=${f.phone}&text=${text}` : `https://web.whatsapp.com/send?phone=${f.phone}&text=${text}`;
   window.open(url, 'np_whatsapp');
   hide('step1'); show('step2');
 }
@@ -555,6 +576,15 @@ function hide(id) { document.getElementById(id).classList.add('hidden'); }
 })();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+
+/* ---------- install to home screen / dock ---------- */
+let installEvt = null;
+const STANDALONE = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; show('installBtn'); });
+window.addEventListener('appinstalled', () => hide('installBtn'));
+function installApp() { if (!installEvt) return; installEvt.prompt(); installEvt.userChoice.finally(() => { installEvt = null; hide('installBtn'); }); }
+function dismissIosHint() { hide('iosHint'); LS.set('iosHintOff', true); }
+if (/iPhone|iPad|iPod/.test(navigator.userAgent) && !STANDALONE && !LS.get('iosHintOff', false)) show('iosHint');
 </script>
 </body>
 </html>
