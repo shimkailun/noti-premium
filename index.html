@@ -116,6 +116,16 @@
       <div id="fileInfo" class="muted" style="margin-top:6px"></div>
     </div>
     <input type="file" id="file" accept=".xlsx,.xls,.csv" class="hidden">
+    <details style="margin-top:14px">
+      <summary><b>📥 Get the file from ePartner in one click (recommended, on a computer)</b></summary>
+      <p class="sub" style="margin-top:8px">ePartner's list has no phone numbers or overdue amounts. The collector reads them from each overdue policy's details, using your own ePartner login, and saves one file for this app. Nothing is sent anywhere else.</p>
+      <ol style="margin:0 0 8px 18px;padding:0;font-size:13.5px">
+        <li><b>One time:</b> show Chrome's bookmarks bar (⌘⇧B), then <b>drag this button onto it</b>: <a id="collectorLink" class="btn" style="display:inline-block;margin:4px 0;background:var(--brand);color:#fff;text-decoration:none" href="#" onclick="alert('Drag this button to your bookmarks bar instead of clicking it.');return false">📥 Noti-premium collector</a></li>
+        <li><b>Every week:</b> log in to ePartner yourself → Policy Enquiry → <b>View all policies</b> → Submit.</li>
+        <li>Click <b>📥 Noti-premium collector</b> in your bookmarks bar. It skips your own policies and saves <i>Noti-premium_ePartner_[date].csv</i> to Downloads.</li>
+        <li>Drop that file into the box above.</li>
+      </ol>
+    </details>
   </section>
 
   <!-- STEP 2: CONFIRM MAPPING -->
@@ -202,17 +212,21 @@ let mapping = LS.get('mapping', {});  // field -> header name
 let failStatuses = LS.get('failStatuses', null);
 
 let raw = { headers: [], rows: [], fileName: '' };
-let flagged = [], issues = [], resolved = [], activeTab = 'action';
+let flagged = [], issues = [], resolved = [], activeTab = 'action', paidCount = 0;
 const IS_PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 /* ---------- fields & auto-detection ---------- */
 const FIELDS = [
   { key: 'policy', label: 'Policy number', req: true, syn: ['policy no', 'policy number', 'policy num', 'policyno', 'policy', 'contract no', 'cert no'] },
-  { key: 'name', label: 'Customer name', req: false, syn: ['policy owner', 'owner name', 'customer name', 'client name', 'insured name', 'policyholder', 'name', 'owner', 'customer', 'client'] },
+  { key: 'name', label: 'Customer name', req: false, syn: ['policy holder', 'policy owner', 'owner name', 'customer name', 'client name', 'insured name', 'policyholder', 'name', 'owner', 'customer', 'client'] },
   { key: 'phone', label: 'Mobile number', req: true, syn: ['mobile', 'handphone', 'hp no', 'hp', 'phone', 'contact no', 'contact', 'tel', 'cell'] },
   { key: 'amount', label: 'Premium amount (RM)', req: false, syn: ['outstanding premium', 'premium due', 'modal premium', 'premium amount', 'installment premium', 'amount due', 'premium', 'amount'] },
   { key: 'due', label: 'Premium due date', req: true, syn: ['next due date', 'premium due date', 'due date', 'paid to date', 'ptd', 'next due', 'due'] },
-  { key: 'status', label: 'Payment status', req: true, syn: ['payment status', 'premium status', 'billing status', 'collection status', 'deduction status', 'policy status', 'status'] }
+  { key: 'status', label: 'Payment status', req: true, syn: ['payment status', 'premium status', 'billing status', 'collection status', 'deduction status', 'policy status', 'status'] },
+  { key: 'overdue', label: 'Overdue premium (RM)', req: false, syn: ['overdue premium', 'overdue amount', 'arrears'] },
+  { key: 'lastpaid', label: 'Last payment date', req: false, syn: ['last payment date', 'last paid date', 'last payment'] },
+  { key: 'suspense', label: 'Suspense / unallocated (RM)', req: false, syn: ['suspense', 'unallocated amount'] },
+  { key: 'lapse', label: 'Potential lapse date', req: false, syn: ['potential lapse date', 'lapse date'] }
 ];
 const FAIL_HINTS = ['unsuccess', 'fail', 'unalloc', 'suspense', 'reject', 'bounce', 'overdue', 'outstanding', 'due', 'unpaid', 'insufficient', 'declin', 'grace', 'return'];
 
@@ -301,8 +315,13 @@ function buildStatusList() {
   const counts = {};
   raw.rows.forEach(r => { const v = String(r[col] ?? '').trim() || '(blank)'; counts[v] = (counts[v] || 0) + 1; });
   const vals = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  // with an Overdue premium column, in-force policies are checked and the overdue amount decides who is unpaid
+  const hasOverdue = !!document.getElementById('map_overdue')?.value;
+  const saved = failStatuses && vals.some(v => failStatuses.includes(v)) ? failStatuses : null;
   box.innerHTML = vals.map((v, i) => {
-    const on = failStatuses ? failStatuses.includes(v) : (v !== '(blank)' && FAIL_HINTS.some(h => norm(v).includes(h)) && !/^(paid|in force|inforce|active|success)/.test(norm(v)));
+    const on = saved ? saved.includes(v)
+      : hasOverdue ? (/^inforce/i.test(v) && !/fully paid|waived/i.test(v))
+      : (v !== '(blank)' && FAIL_HINTS.some(h => norm(v).includes(h)) && !/^(paid|in force|inforce|active|success)/.test(norm(v)));
     return `<label class="chk"><input type="checkbox" data-v="${esc(v)}" ${on ? 'checked' : ''}> ${esc(v)} <span class="muted">(${counts[v]})</span></label>`;
   }).join('');
 }
@@ -374,7 +393,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 
 /* ---------- core logic ---------- */
 function analyse() {
-  const T = today0(); flagged = []; issues = [];
+  const T = today0(); flagged = []; issues = []; paidCount = 0;
   const seen = {};
   const failSet = new Set(failStatuses);
   const currentKeys = new Set();
@@ -388,23 +407,39 @@ function analyse() {
     if (!policy) probs.push('No policy number');
     const ph = parsePhone(r[mapping.phone]); if (ph.err) probs.push(ph.err);
     const dd = parseDate(r[mapping.due]); if (dd.err) probs.push(dd.err);
+    // ePartner's Overdue Premium is the source of truth: 0 means paid, and a not-yet-due policy needs nothing
+    const overdueRaw = mapping.overdue ? String(r[mapping.overdue] ?? '').trim() : '';
+    const overdueNum = parseFloat(overdueRaw.replace(/[^0-9.\-]/g, ''));
+    const overdue = overdueRaw && isFinite(overdueNum) ? overdueNum : null;   // unreadable stays unknown, never "paid"
+    if ((overdue === 0) || (mapping.overdue && dd.ok && dd.ok > T)) { paidCount++; continue; }
     if (policy) { if (seen[policy]) probs.push('Duplicate policy row (also row ' + seen[policy] + ')'); else seen[policy] = r._row; }
     if (probs.length) { issues.push({ row: r._row, policy, name, status, probs }); continue; }
 
-    const amount = mapping.amount ? parseAmount(r[mapping.amount]) : null;
+    // the message quotes what the customer actually owes when ePartner gives it
+    const amount = overdue > 0 ? overdue : (mapping.amount ? parseAmount(r[mapping.amount]) : null);
+    const lastPaid = mapping.lastpaid ? parseDate(r[mapping.lastpaid]).ok || null : null;
+    const lapse = mapping.lapse ? parseDate(r[mapping.lapse]).ok || null : null;
+    const suspense = mapping.suspense ? parseAmount(r[mapping.suspense]) : null;
     const days = Math.round((T - dd.ok) / 864e5);
     const key = policy + '|' + iso(dd.ok);
     currentKeys.add(key);
     const L = log[key] || {};
+    // Reminder 1 always goes first; Reminder 2 from day 7, at least 3 days after Reminder 1
+    const r2From = L.r1 ? new Date(new Date(L.r1 + 'T00:00:00').getTime() + 3 * 864e5) : null;
     let stage, label;
     if (days < 0) { stage = 'watch'; label = `Not due yet (due in ${-days} day${days === -1 ? '' : 's'})`; }
     else if (days < 3) { stage = 'watch'; label = `Watch: reminder in ${3 - days} day${3 - days === 1 ? '' : 's'}`; }
-    else if (days < 7) { stage = L.r1 ? 'waiting' : 'r1'; label = L.r1 ? 'Reminder 1 sent, Reminder 2 on day 7' : 'Send Reminder 1'; }
-    else { stage = L.r2 ? 'done' : 'r2'; label = L.r2 ? 'Both reminders sent. Call customer' : 'Send Reminder 2'; }
+    else if (!L.r1) { stage = 'r1'; label = 'Send Reminder 1'; }
+    else if (L.r2) { stage = 'done'; label = 'Both reminders sent. Call customer'; }
+    else if (days >= 7 && T >= r2From) { stage = 'r2'; label = 'Send Reminder 2'; }
+    else { stage = 'waiting'; label = `Reminder 1 sent. Reminder 2 from ${fmtD(new Date(Math.max(r2From, dd.ok.getTime() + 7 * 864e5)))}`; }
     const warns = [];
     if (!name) warns.push('no name');
     if (amount == null) warns.push('no amount');
-    flagged.push({ key, policy, name: name ? titleCase(name) : '', phone: ph.ok, amount, due: dd.ok, days, status, stage, label, log: L, warns });
+    if (mapping.overdue && overdue == null) warns.push('overdue amount not confirmed in ePartner');
+    if (suspense) warns.push(`RM ${fmtRM(suspense)} in suspense (unallocated), check with Great Eastern`);
+    if (lapse && (lapse - T) / 864e5 <= 30) warns.push(`policy may lapse on ${fmtD(lapse)}`);
+    flagged.push({ key, policy, name: name ? titleCase(name) : '', phone: ph.ok, amount, due: dd.ok, days, status, stage, label, log: L, warns, lastPaid, lapse, suspense });
   }
   flagged.sort((a, b) => b.days - a.days);
 
@@ -431,14 +466,15 @@ function render() {
     <div class="stat r2"><div class="n">${c('r2')}</div><div class="l">Reminder 2 to send (day 7+)</div></div>
     <div class="stat"><div class="n">${flagged.length}</div><div class="l">Unpaid policies · RM ${fmtRM(outstanding)}</div></div>
     <div class="stat bad"><div class="n">${issues.length}</div><div class="l">Data issues to check</div></div>
-    <div class="stat ok"><div class="n">${resolved.length}</div><div class="l">Resolved since last reminder</div></div>`;
+    <div class="stat ok"><div class="n">${resolved.length}</div><div class="l">Resolved since last reminder</div></div>
+    ${mapping.overdue ? `<div class="stat ok"><div class="n">${paidCount}</div><div class="l">Paid or not yet due (ignored)</div></div>` : ''}`;
 
   const tabs = [['action', 'To send now', c('r1') + c('r2')], ['all', 'All unpaid', flagged.length], ['watch', 'Watching (<3 days)', c('watch')], ['sent', 'Already reminded', c('waiting') + c('done')]];
   document.getElementById('tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${k === activeTab ? 'on' : ''}" onclick="activeTab='${k}';render()">${l} (${n})</button>`).join('');
 
   const list = flagged.filter(f => activeTab === 'all' ? true : activeTab === 'action' ? (f.stage === 'r1' || f.stage === 'r2') : activeTab === 'watch' ? f.stage === 'watch' : (f.stage === 'waiting' || f.stage === 'done'));
   const pc = { r1: 'p-r1', r2: 'p-r2', watch: 'p-watch', waiting: 'p-watch', done: 'p-ok' };
-  document.getElementById('tbl').innerHTML = `<tr><th>Customer</th><th>Policy</th><th>Premium</th><th>Due date</th><th>Days</th><th>ePartner status</th><th>Next step</th><th></th></tr>` +
+  document.getElementById('tbl').innerHTML = `<tr><th>Customer</th><th>Policy</th><th>Amount owed</th><th>Due date</th><th>Days</th><th>ePartner status</th><th>Next step</th><th></th></tr>` +
     list.map(f => {
       const i = flagged.indexOf(f);
       const sentInfo = [f.log.r1 && 'R1 ' + f.log.r1, f.log.r2 && 'R2 ' + f.log.r2].filter(Boolean).join(' · ');
@@ -446,8 +482,8 @@ function render() {
         : f.stage === 'r2' ? `<button class="wa" onclick="openSend(${i},2)">WhatsApp R2</button>`
         : f.stage === 'done' ? `<a class="btn" href="tel:+${f.phone}">📞 Call</a>` : '';
       return `<tr><td class="c-name"><b>${esc(f.name || '(no name)')}</b><br><span class="muted">+${f.phone}</span>${f.warns.length ? `<br><span class="warn">⚠ ${f.warns.join(', ')}</span>` : ''}</td>
-        <td data-l="Policy">${esc(f.policy)}</td><td data-l="Premium">${f.amount != null ? 'RM ' + fmtRM(f.amount) : '<span class="muted">n/a</span>'}</td>
-        <td data-l="Due date">${fmtD(f.due)}</td><td data-l="Days"><b>${f.days}</b></td><td data-l="ePartner status">${esc(f.status)}</td>
+        <td data-l="Policy">${esc(f.policy)}</td><td data-l="Amount owed">${f.amount != null ? 'RM ' + fmtRM(f.amount) : '<span class="muted">n/a</span>'}</td>
+        <td data-l="Due date">${fmtD(f.due)}${f.lastPaid ? `<br><span class="muted" style="font-size:12px">last paid ${fmtD(f.lastPaid)}</span>` : ''}</td><td data-l="Days"><b>${f.days}</b></td><td data-l="ePartner status">${esc(f.status)}</td>
         <td class="c-step"><span class="pill ${pc[f.stage]}">${f.label}</span>${sentInfo ? `<br><span class="muted" style="font-size:12px">${sentInfo}</span>` : ''}</td><td class="c-btn">${btn}</td></tr>`;
     }).join('');
   document.getElementById('emptyMsg').textContent = list.length ? '' : (activeTab === 'action' ? 'Nothing to send right now. 🎉' : 'No policies in this view.');
@@ -507,7 +543,7 @@ function markSent(i, n) {
   log[f.key] = Object.assign(log[f.key] || {}, { name: f.name, phone: f.phone, ['r' + n]: T });
   LS.set('log', log);
   f.log = log[f.key];
-  if (n === 1) { f.stage = 'waiting'; f.label = 'Reminder 1 sent, Reminder 2 on day 7'; }
+  if (n === 1) { f.stage = 'waiting'; f.label = 'Reminder 1 sent today. Reminder 2 in 3+ days if still unpaid'; }
   else { f.stage = 'done'; f.label = 'Both reminders sent. Call customer'; }
   closeModal(); render();
 }
@@ -576,6 +612,66 @@ function hide(id) { document.getElementById(id).classList.add('hidden'); }
 })();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+
+/* ---------- ePartner collector (runs as a bookmark on the ePartner "View all policies" page) ---------- */
+// Self-contained: it must not use anything else from this app, because it runs inside ePartner.
+async function NP_COLLECT(testMode) {
+  const T = [...document.querySelectorAll('table')].find(t => t.rows.length > 1 && /Policy No/.test(t.rows[0].innerText) && /Premium Due Date/.test(t.rows[0].innerText));
+  if (!T) { alert('Noti-premium: open ePartner > Policy Enquiry > View all policies and press Submit first, then click this bookmark again.'); return; }
+  const txt = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const H = [...T.rows[0].cells].map(c => txt(c.innerText)), col = n => H.indexOf(n);
+  const pd = s => { const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], m[2] - 1, +m[1]) : null; };
+  const agent = txt((document.body.innerText.match(/Agent Name:\s*([^\n]+)/) || [])[1]);
+  const f = document.forms.FPMS_PolicyEnquiryForm, plan = {};
+  for (let k = 0; f && f['policyStr' + k]; k++) plan[f['policyStr' + k].value] = f['mainPlan' + k] ? f['mainPlan' + k].value : '';
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const rows = [...T.rows].slice(1).map(r => [...r.cells].map(c => txt(c.innerText)));
+  const own = rows.filter(c => c[col('Policy Holder')] === agent).length;
+  const inforce = rows.filter(c => /^Inforce/i.test(c[col('Status')]) && !/fully paid|waived/i.test(c[col('Status')]) && c[col('Policy Holder')] !== agent);
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:99999;background:#0f766e;color:#fff;padding:14px 18px;border-radius:10px;font:14px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:340px';
+  document.body.appendChild(box);
+  const DATE = /^\d{1,2}\/\d{1,2}\/\d{4}$/, NUM = /^-?[\d,]+(\.\d+)?$/;
+  const out = [], due = inforce.filter(c => pd(c[col('Premium Due Date')]) && pd(c[col('Premium Due Date')]) <= today);
+  let n = 0;
+  for (const c of inforce) {
+    const pol = c[col('Policy No.')];
+    const rec = { 'Policy No': pol, 'Policy Holder': c[col('Policy Holder')], 'Mobile No': '', 'Premium Amount': c[col('Premium Amount')], 'Overdue Premium': '', 'Suspense': '', 'Total Debts': '',
+      'Next Due Date': c[col('Premium Due Date')], 'Last Payment Date': c[col('Last payment date')], 'Potential Lapse Date': '', 'Payment Method': c[col('Payment Method')], 'Payment Mode': c[col('Payment Mode')], 'Status': c[col('Status')], 'Note': '' };
+    if (due.includes(c)) {
+      box.textContent = 'Noti-premium: reading overdue policy ' + (++n) + ' of ' + due.length + '…';
+      try {
+        const url = new URL('policyEnquiry.do?action=getPolicyDetail&policyNoInput=' + encodeURIComponent(pol) + '&planTypeInput=' + encodeURIComponent(plan[pol] || ''), location.href);
+        const d = new DOMParser().parseFromString(await (await fetch(url, { credentials: 'include' })).text(), 'text/html');
+        d.querySelectorAll('script,style').forEach(e => e.remove());
+        const cells = [...d.querySelectorAll('td,th')].map(x => txt(x.textContent));
+        const get = (label, re) => { const i = cells.indexOf(label); if (i < 0) return ''; for (let j = i + 1; j <= i + 2 && j < cells.length; j++) { const v = cells[j].replace(/^:\s*/, ''); if (re.test(v)) return v; } return ''; };
+        rec['Mobile No'] = get('Mobile No', /\d{7,}/);
+        rec['Overdue Premium'] = get('Overdue Premium', NUM);
+        rec['Suspense'] = get('Suspense', NUM);
+        rec['Total Debts'] = get('Total Debts', NUM);
+        rec['Potential Lapse Date'] = get('Potential Lapse Date', DATE);
+        rec['Next Due Date'] = get('Next Due Date', DATE) || rec['Next Due Date'];
+        rec['Last Payment Date'] = get('Last Payment Date', DATE) || rec['Last Payment Date'];
+        rec['Premium Amount'] = get('Total Installment Premium', NUM) || rec['Premium Amount'];
+        if (!rec['Overdue Premium']) rec.Note = 'Overdue amount not found on policy page';
+      } catch (e) { rec.Note = 'Could not open policy details'; }
+      await new Promise(r => setTimeout(r, 300));
+    } else rec.Note = 'Not due yet';
+    out.push(rec);
+  }
+  const cols = Object.keys(out[0] || { 'Policy No': 1 });
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const csv = [cols.map(q).join(',')].concat(out.map(r => cols.map(k => q(r[k])).join(','))).join('\r\n');
+  box.textContent = 'Noti-premium: done. Checked ' + due.length + ' overdue policies (' + own + ' of your own skipped). Now drop the downloaded file into Noti-premium.';
+  setTimeout(() => box.remove(), 15000);
+  if (testMode) return { csv, overdueChecked: due.length, rows: out.length, own };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'Noti-premium_ePartner_' + today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+document.getElementById('collectorLink').href = 'javascript:' + encodeURIComponent('(' + NP_COLLECT.toString() + ')()');
 
 /* ---------- install to home screen / dock ---------- */
 let installEvt = null;
